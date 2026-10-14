@@ -101,6 +101,7 @@ GPL-3.0-or-later — see [LICENSE](LICENSE). Third-party code:
 
 - `src/leveldb/`, `src/db/`, `src/util/` are taken from
   [mojang/leveldb](https://github.com/mojang/leveldb) (`origin/main`), BSD-3-Clause © The LevelDB
-  Authors; every vendored file keeps its original notice;
-- RocksDB is statically linked into the build output (xmake package), licensed Apache-2.0 / GPL-2.0 —
-  redistribute its license text together with the binaries.
+  Authors; its `LICENSE` and `AUTHORS` ship next to the vendored sources, and every file keeps its
+  original notice;
+- RocksDB is used under Apache-2.0 and statically linked into the build output (xmake package); the
+  license texts live in [`licenses/rocksdb/`](licenses/rocksdb) and are included in the release zip.

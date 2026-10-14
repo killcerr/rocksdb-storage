@@ -93,9 +93,10 @@ xmake
 
 ## 许可
 
-GPL-3.0-or-later，见 [LICENSE](LICENSE)。第三方代码：
+本项目采用 GPL-3.0-or-later（见 [LICENSE](LICENSE)）。第三方代码：
 
 - `src/leveldb/`、`src/db/`、`src/util/` 取自 [mojang/leveldb](https://github.com/mojang/leveldb)
-  （`origin/main`），BSD-3-Clause © The LevelDB Authors，各文件头保留原声明；
-- RocksDB 被静态链接进产物（xmake 包），Apache-2.0 / GPL-2.0 双许可——分发二进制时需一并附带其许可
-  文本。
+  （`origin/main`），BSD-3-Clause © The LevelDB Authors，随源码保留其 `LICENSE`/`AUTHORS`，各文件头也
+  保留原声明；
+- RocksDB 按 Apache-2.0 使用并静态链接进产物（xmake 包），许可文本见
+  [`licenses/rocksdb/`](licenses/rocksdb)，发布包（zip）里也会带上。
