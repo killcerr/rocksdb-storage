@@ -1,29 +1,106 @@
-# LeviLamina Mod Template
+# rocksdb-storage
 
-> [!WARNING]
-> Remember to change the [LICENSE](LICENSE) file when you use this template
+A [LeviLamina](https://lamina.levimc.org/) mod that moves a Bedrock Dedicated Server world off
+LevelDB and onto [RocksDB](https://rocksdb.org/). The existing world data is left untouched.
 
-Mod Template for LeviLamina
+English | [中文](README.zh-CN.md)
 
-## Usage
+---
 
-For detailed instructions, see the [LeviLamina Documentation](https://lamina.levimc.org/developer_guides/tutorials/create_your_first_mod/)
+## What it is
 
-1. Generate a new repository from this template
-2. Clone the new repository
-3. Change the mod name and the expected LeviLamina version in `xmake.lua`
-4. Add your code.
-5. Run `xmake f -y -p windows -a x64 -m release` in the root of the repository
-6. Run `xmake` to build the mod.
+BDS stores its world with an old LevelDB engine. With this mod installed, the server reads and writes
+world data through RocksDB instead — an actively developed key-value store with more tuning options.
+Worlds that already exist are migrated automatically, and the original directory is kept as is: nothing
+is deleted or renamed.
 
-After a successful build, you will find mod in `bin/`
+## Install
 
-## Contributing
+1. The server needs LeviLamina 26.51.7 or newer and BDS 1.26.51.1 (back up first if you run anything else).
+2. From the server root, install it with [lip](https://lip.levimc.org/):
 
-Ask questions by creating an issue.
+   ```bash
+   lip install github.com/killcerr/rocksdb-storage
+   ```
 
-PRs accepted.
+   Add `@version` to pin one, e.g. `lip install github.com/killcerr/rocksdb-storage@0.0.0`.
+3. Restart the server.
+
+This line in the log means it is in effect:
+
+```
+[rocksdb-storage] rocksdb-storage: opened rocksdb database at worlds/Bedrock level\rocksdb
+```
+
+## What happens on the first start
+
+If the world directory still holds a LevelDB database (the `db` folder), the mod copies it into a
+sibling `rocksdb` folder on the first start and reports progress in the log:
+
+```
+rocksdb-storage: migrating worlds/Bedrock level/db into worlds/Bedrock level\rocksdb
+rocksdb-storage: migrated worlds/Bedrock level/db into worlds/Bedrock level\rocksdb (keys=..., 3.2s), leveldb database kept at worlds/Bedrock level/db
+```
+
+Do not kill the server while this runs; should it be interrupted, the next start simply migrates again,
+because the original `db` is never modified.
+
+Once migrated:
+
+```
+worlds/Bedrock level/
+├── db/        the old database, untouched
+├── rocksdb/   what the server actually uses
+└── level.dat
+```
+
+## Configuration
+
+`plugins/rocksdb-storage/config/config.json` (a restart applies changes):
+
+```json
+{
+    "version": 1,
+    "enabled": true,
+    "migrateExisting": true
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | When `false`, worlds are opened with the original LevelDB again. |
+| `migrateExisting` | `true` | When `false`, an existing world is opened as it is instead of being migrated. |
+
+## Things to know
+
+- **There is no migration back.** After the first start, `db` is a snapshot of the moment the world was
+  migrated. Removing the mod, or deleting the `rocksdb` folder, makes the server fall back to that
+  snapshot — the world looks reverted, so keep `rocksdb` to keep your progress.
+- **Compression is off** for now, so `rocksdb` takes up somewhat more space than `db`.
+- Servers that enable the non-default database file encryption are not supported.
+- Only BDS 1.26.51.1 with LeviLamina 26.51.7 has been verified. On other versions the mod stays out of
+  the way and does not touch your data.
+- Server-side only; there is nothing to install on clients.
+- Development stage, version `0.0.0`.
+
+## Build from source
+
+Requires xmake and clang-cl:
+
+```bash
+xmake f -y -p windows -a x64 -m release
+xmake
+```
+
+The result is in `bin/rocksdb-storage/`; copy that folder into the mods directory. The first build
+downloads and compiles the dependencies, including rocksdb, which takes a few minutes.
 
 ## License
 
-CC0-1.0 © LeviMC(LiteLDev)
+GPL-3.0-or-later — see [LICENSE](LICENSE). Third-party code:
+
+- `src/leveldb/`, `src/db/`, `src/util/` are taken from
+  [mojang/leveldb](https://github.com/mojang/leveldb) (`origin/main`), BSD-3-Clause © The LevelDB
+  Authors; every vendored file keeps its original notice;
+- RocksDB is statically linked into the build output (xmake package), licensed Apache-2.0 / GPL-2.0 —
+  redistribute its license text together with the binaries.
