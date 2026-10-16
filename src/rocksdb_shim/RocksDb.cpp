@@ -1,5 +1,9 @@
 #include "rocksdb_shim/RocksDb.h"
 
+#include "rocksdb_shim/Config.h"
+
+#include <array>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -40,20 +44,93 @@ leveldb::Status toLevelDbStatus(rocksdb::Status const& s) {
     }
 }
 
+DbConfig& dbConfig() {
+    static DbConfig config;
+    return config;
+}
+
+namespace {
+
+// The compressors this build links, as set up by the rocksdb configs in
+// xmake.lua. Keeping the conversion here means config.json can only name a
+// compressor that actually exists in the binary.
+constexpr rocksdb::CompressionType toRocksCompression(Compression compression) {
+    switch (compression) {
+    case Compression::none:
+        return rocksdb::kNoCompression;
+    case Compression::lz4:
+        return rocksdb::kLZ4Compression;
+    case Compression::lz4hc:
+        return rocksdb::kLZ4HCCompression;
+    case Compression::zstd:
+        return rocksdb::kZSTD;
+    }
+    return rocksdb::kNoCompression;
+}
+
+constexpr std::string_view compressionName(Compression compression) {
+    switch (compression) {
+    case Compression::none:
+        return "none";
+    case Compression::lz4:
+        return "lz4";
+    case Compression::lz4hc:
+        return "lz4hc";
+    case Compression::zstd:
+        return "zstd";
+    }
+    return "none";
+}
+
+}  // namespace
+
 rocksdb::Options rocksOptions() {
+    auto const& cfg = dbConfig();
+
+    // Settings a config file can get wrong fall back to the defaults here
+    // rather than reaching rocksdb; what is left is logged below.
+    int const blockSize    = cfg.blockSize > 0 ? cfg.blockSize : 4096;
+    int const bloomBits    = cfg.bloomBits >= 0 ? cfg.bloomBits : 10;
+    int const blockCache   = cfg.blockCacheMiB >= 0 ? cfg.blockCacheMiB : 80;
+    int const writeBuffer  = cfg.writeBufferMiB > 0 ? cfg.writeBufferMiB : 4;
+    int const maxOpenFiles = cfg.maxOpenFiles == -1 ? -1 : (cfg.maxOpenFiles > 0 ? cfg.maxOpenFiles : 1000);
+
     rocksdb::Options o;
-    o.create_if_missing = true;
-    o.error_if_exists   = false;
-    // Blocks are stored as they are: the rocksdb build links no compressor.
-    o.compression       = rocksdb::kNoCompression;
-    o.write_buffer_size = 4 << 20;
-    o.max_open_files    = 1000;
+    o.create_if_missing       = true;
+    o.error_if_exists         = false;
+    o.compression             = toRocksCompression(cfg.compression);
+    o.bottommost_compression  = toRocksCompression(cfg.bottommostCompression);
+    o.write_buffer_size       = static_cast<std::size_t>(writeBuffer) << 20;
+    o.max_open_files          = maxOpenFiles;
+    if (cfg.compressionLevel != 0) {
+        // 0 stays CompressionOptions::kDefaultCompressionLevel, whatever the
+        // algorithm's own default is. bottommost_compression_opts is left
+        // unset on purpose: that makes the bottommost level inherit this.
+        o.compression_opts.level = cfg.compressionLevel;
+    }
 
     rocksdb::BlockBasedTableOptions table;
-    table.block_size      = 4096;
-    table.block_cache     = rocksdb::NewLRUCache(static_cast<size_t>(80) << 20);
-    table.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+    table.block_size = static_cast<uint64_t>(blockSize);
+    if (blockCache > 0) {
+        table.block_cache = rocksdb::NewLRUCache(static_cast<std::size_t>(blockCache) << 20);
+    } else {
+        table.no_block_cache = true;
+    }
+    if (bloomBits > 0) table.filter_policy.reset(rocksdb::NewBloomFilterPolicy(bloomBits));
     o.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table));
+
+    ll::mod::NativeMod::current()->getLogger().info(
+        "rocksdb-storage: rocksdb options: compression={} level={} bottommost={} block_size={} bloom_bits={} "
+        "block_cache={}MiB write_buffer={}MiB max_open_files={}",
+        compressionName(cfg.compression),
+        cfg.compressionLevel,
+        compressionName(cfg.bottommostCompression),
+        blockSize,
+        bloomBits,
+        blockCache,
+        writeBuffer,
+        maxOpenFiles
+    );
     return o;
 }
 
@@ -185,6 +262,7 @@ void McRocksDb::ReleaseSnapshot(leveldb::Snapshot const* snapshot) {
 }
 
 bool McRocksDb::GetProperty(leveldb::Slice const& property, std::string* value) {
+
     static constexpr char const* kMapped[] = {
         "leveldb.stats",
         "leveldb.sstables",
