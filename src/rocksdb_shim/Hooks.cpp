@@ -188,6 +188,27 @@ openWithPolicy(leveldb::Options const& options, std::string const& name, auto&& 
     std::string                 err;
     std::unique_ptr<leveldb::DB> db = makeRocksDb(rocks, &err);
     if (!db) return makeIoError("rocksdb open failed", err);
+
+    // The game keeps working off the leveldb directory even when the database
+    // itself lives in rocksdb: its save machinery (SaveCommand::saveHold and the
+    // file listing that "save query" reports) walks that directory. With a world
+    // whose leveldb directory was never created, "save hold" prints "Saving..."
+    // and "save query" never reports "Data saved.", so the world is only written
+    // on shutdown. Creating the leveldb database here costs a handful of files
+    // and keeps that path intact; every later open checks for rocksdb first, so
+    // the stub is never read.
+    leveldb::DB*  stub = nullptr;
+    leveldb::Status stubStatus = originOpen(options, name, &stub);
+    if (stub != nullptr) {
+        delete stub;
+    } else {
+        ll::mod::NativeMod::current()->getLogger().warn(
+            "rocksdb-storage: could not create the leveldb directory {}: {}",
+            dbPath.string(),
+            stubStatus.ToString()
+        );
+    }
+
     ll::mod::NativeMod::current()->getLogger().info(
         "rocksdb-storage: created rocksdb database at {}", rocks.string()
     );
